@@ -92,11 +92,12 @@ stages:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STAGE 2 — Build image Docker + Push vers Azure Container Registry
+# NOTE: Désactivé temporairement — nécessite service connection ACR-Service-Connection
 # ═══════════════════════════════════════════════════════════════════════════════
   - stage: DockerBuild
     displayName: 'Docker Build · Push ACR'
     dependsOn: Build
-    condition: succeeded()
+    condition: false
     jobs:
       - job: BuildAndPushImage
         displayName: 'docker build + push → ACR'
@@ -117,15 +118,12 @@ stages:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STAGE 3 — Déploiement automatique sur DEV (branche develop uniquement)
+# NOTE: Désactivé temporairement — nécessite service connection Azure-Service-Connection
 # ═══════════════════════════════════════════════════════════════════════════════
   - stage: DeployDev
     displayName: 'Deploy → DEV (auto)'
     dependsOn: DockerBuild
-    condition: >
-      and(
-        succeeded(),
-        eq(variables['Build.SourceBranch'], 'refs/heads/develop')
-      )
+    condition: false
     jobs:
       - deployment: DeployToDev
         displayName: 'App Service DEV · container'
@@ -145,15 +143,12 @@ stages:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STAGE 4 — Déploiement PROD avec approbation manuelle + slot swap (Blue/Green)
+# NOTE: Désactivé temporairement — nécessite service connection Azure-Service-Connection
 # ═══════════════════════════════════════════════════════════════════════════════
   - stage: DeployProd
     displayName: 'Deploy → PROD (approbation + Blue/Green)'
     dependsOn: DockerBuild
-    condition: >
-      and(
-        succeeded(),
-        eq(variables['Build.SourceBranch'], 'refs/heads/main')
-      )
+    condition: false
     jobs:
       - deployment: DeployToProd
         displayName: 'App Service PROD · staging slot → swap'
@@ -164,7 +159,6 @@ stages:
           runOnce:
             deploy:
               steps:
-                # 1. Déployer d'abord sur le slot staging (zéro downtime)
                 - task: AzureWebAppContainer@1
                   displayName: 'Déployer sur slot staging'
                   inputs:
@@ -173,7 +167,6 @@ stages:
                     slotName: 'staging'
                     containers: '$(ACR_LOGIN_SERVER)/$(imageRepository):$(tag)'
 
-                # 2. Swap staging → production (Blue/Green)
                 - task: AzureAppServiceManage@0
                   displayName: 'Swap staging → production'
                   inputs:
