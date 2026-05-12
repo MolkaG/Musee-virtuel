@@ -66,7 +66,7 @@ stages:
               path: $(MAVEN_CACHE_FOLDER)
 
           # Préparation de l'analyse SonarCloud
-          - task: SonarCloudPrepare@1
+          - task: SonarCloudPrepare@2
             displayName: 'Préparer analyse SonarCloud'
             inputs:
               SonarCloud: 'SonarCloud-Connection'
@@ -92,7 +92,7 @@ stages:
               sqMavenPluginVersionChoice: 'latest'
 
           # Attendre et publier le Quality Gate SonarCloud
-          - task: SonarCloudPublish@1
+          - task: SonarCloudPublish@2
             displayName: 'Publier résultats SonarCloud'
             inputs:
               pollingTimeoutSec: '300'
