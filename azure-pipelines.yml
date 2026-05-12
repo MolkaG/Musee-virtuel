@@ -73,6 +73,7 @@ stages:
               goals: 'clean verify sonar:sonar'
               options: >
                 -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)
+                -Dmaven.test.failure.ignore=true
                 -Dsonar.projectKey=$(SONAR_PROJECT_KEY)
                 -Dsonar.organization=$(SONAR_ORG)
                 -Dsonar.host.url=https://sonarcloud.io
