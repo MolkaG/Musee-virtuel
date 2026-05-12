@@ -5,7 +5,7 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>2.5.2</version>
+		<version>2.7.18</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>fr.eql.aec</groupId>
@@ -16,8 +16,12 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-		<java.version>1.8</java.version>
-		<spring-cloud.version>2020.0.3</spring-cloud.version>
+		<java.version>17</java.version>
+		<spring-cloud.version>2021.0.8</spring-cloud.version>
+		<sonar.organization>molkag</sonar.organization>
+		<sonar.projectKey>musee-virtuel</sonar.projectKey>
+		<sonar.host.url>https://sonarcloud.io</sonar.host.url>
+		<jacoco.version>0.8.11</jacoco.version>
 	</properties>
 	<dependencies>
 		<!--Spring boot-->
@@ -124,6 +128,26 @@
 						</exclude>
 					</excludes>
 				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>${jacoco.version}</version>
+				<executions>
+					<execution>
+						<goals><goal>prepare-agent</goal></goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>verify</phase>
+						<goals><goal>report</goal></goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.sonarsource.scanner.maven</groupId>
+				<artifactId>sonar-maven-plugin</artifactId>
+				<version>3.11.0.3922</version>
 			</plugin>
 		</plugins>
 	</build>

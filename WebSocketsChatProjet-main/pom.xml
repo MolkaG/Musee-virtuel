@@ -6,8 +6,8 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>2.5.2</version>
-		<relativePath /> <!-- lookup parent from repository -->
+		<version>2.7.18</version>
+		<relativePath />
 	</parent>
 	<groupId>fr.eql.al35</groupId>
 	<artifactId>WebSocketsChat</artifactId>
@@ -15,14 +15,30 @@
 	<name>WebSocketsChat</name>
 	<description>A chat application</description>
 	<properties>
-		<java.version>1.8</java.version>
+		<java.version>17</java.version>
+		<sonar.organization>molkag</sonar.organization>
+		<sonar.projectKey>musee-virtuel</sonar.projectKey>
+		<sonar.host.url>https://sonarcloud.io</sonar.host.url>
+		<jacoco.version>0.8.11</jacoco.version>
 	</properties>
+
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-websocket</artifactId>
 		</dependency>
-
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-web</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
 		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
@@ -33,14 +49,6 @@
 			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-web</artifactId>
-		</dependency>
-		<dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-security</artifactId>
-        </dependency>
 	</dependencies>
 
 	<build>
@@ -57,6 +65,26 @@
 						</exclude>
 					</excludes>
 				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>${jacoco.version}</version>
+				<executions>
+					<execution>
+						<goals><goal>prepare-agent</goal></goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>verify</phase>
+						<goals><goal>report</goal></goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.sonarsource.scanner.maven</groupId>
+				<artifactId>sonar-maven-plugin</artifactId>
+				<version>3.11.0.3922</version>
 			</plugin>
 		</plugins>
 	</build>

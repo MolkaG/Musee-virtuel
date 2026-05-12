@@ -1,0 +1,200 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pipeline CI/CD — Musée Virtuel (WebSocketsChat)
+# Stages : Build → DockerBuild → DeployDev → DeployProd
+# ═══════════════════════════════════════════════════════════════════════════════
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    exclude:
+      - 'docs/**'
+      - 'README.md'
+      - 'terraform/**'
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+variables:
+  # ── Groupe de variables défini dans Azure DevOps Library ──────────────────────
+  # Créer un groupe "musee-virtuel-variables" avec :
+  #   ACR_LOGIN_SERVER   = museevirtuelacr.azurecr.io
+  #   APP_NAME_DEV       = app-musee-virtuel-dev
+  #   APP_NAME_PROD      = app-musee-virtuel-prod
+  #   RESOURCE_GROUP     = rg-musee-virtuel-prod
+  #   SONAR_ORG          = <votre-org-sonarcloud>
+  #   SONAR_PROJECT_KEY  = musee-virtuel
+  - group: musee-virtuel-variables
+
+  # ── Variables statiques ───────────────────────────────────────────────────────
+  - name: imageRepository
+    value: 'musee-virtuel'
+  - name: dockerfilePath
+    value: 'gestion-signalement-main/Dockerfile'
+  - name: buildContext
+    value: 'gestion-signalement-main'
+  - name: mavenPomFile
+    value: 'gestion-signalement-main/pom.xml'
+  - name: MAVEN_CACHE_FOLDER
+    value: $(Pipeline.Workspace)/.m2/repository
+  - name: tag
+    value: '$(Build.BuildId)'
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STAGE 1 — Build, Tests JUnit, Analyse SonarCloud
+# ═══════════════════════════════════════════════════════════════════════════════
+stages:
+  - stage: Build
+    displayName: 'Build · Tests · SonarCloud'
+    jobs:
+      - job: BuildAndTest
+        displayName: 'Maven 3 · Java 17 · Sonar'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          # Cache Maven pour accélérer les builds suivants
+          - task: Cache@2
+            displayName: 'Cache dépendances Maven'
+            inputs:
+              key: 'maven | "$(Agent.OS)" | $(mavenPomFile)'
+              restoreKeys: 'maven | "$(Agent.OS)"'
+              path: $(MAVEN_CACHE_FOLDER)
+
+          # Préparation de l'analyse SonarCloud
+          - task: SonarCloudPrepare@1
+            displayName: 'Préparer analyse SonarCloud'
+            inputs:
+              SonarCloud: 'SonarCloud-Connection'
+              organization: '$(SONAR_ORG)'
+              scannerMode: 'Other'
+
+          # Build Maven + exécution des tests JUnit
+          - task: Maven@3
+            displayName: 'mvn clean verify (Java 17)'
+            inputs:
+              mavenPomFile: '$(mavenPomFile)'
+              goals: 'clean verify'
+              options: >
+                -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)
+                -Dsonar.projectKey=$(SONAR_PROJECT_KEY)
+                -Dsonar.organization=$(SONAR_ORG)
+                -Dsonar.host.url=https://sonarcloud.io
+              publishJUnitResults: true
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: '1.17'
+              sonarQubeRunAnalysis: true
+              sqMavenPluginVersionChoice: 'latest'
+
+          # Attendre et publier le Quality Gate SonarCloud
+          - task: SonarCloudPublish@1
+            displayName: 'Publier résultats SonarCloud'
+            inputs:
+              pollingTimeoutSec: '300'
+
+          # Publier le JAR comme artifact de pipeline
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publier JAR artifact'
+            inputs:
+              PathtoPublish: '$(buildContext)/target/WebSocketsChat.jar'
+              ArtifactName: 'app-jar'
+              publishLocation: 'Container'
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STAGE 2 — Build image Docker + Push vers Azure Container Registry
+# ═══════════════════════════════════════════════════════════════════════════════
+  - stage: DockerBuild
+    displayName: 'Docker Build · Push ACR'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: BuildAndPushImage
+        displayName: 'docker build + push → ACR'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: Docker@2
+            displayName: 'Build et Push image vers ACR'
+            inputs:
+              command: 'buildAndPush'
+              repository: '$(imageRepository)'
+              dockerfile: '$(dockerfilePath)'
+              buildContext: '$(buildContext)'
+              containerRegistry: 'ACR-Service-Connection'
+              tags: |
+                $(tag)
+                latest
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STAGE 3 — Déploiement automatique sur DEV (branche develop uniquement)
+# ═══════════════════════════════════════════════════════════════════════════════
+  - stage: DeployDev
+    displayName: 'Deploy → DEV (auto)'
+    dependsOn: DockerBuild
+    condition: >
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/develop')
+      )
+    jobs:
+      - deployment: DeployToDev
+        displayName: 'App Service DEV · container'
+        environment: 'dev'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebAppContainer@1
+                  displayName: 'Déployer container sur App Service DEV'
+                  inputs:
+                    azureSubscription: 'Azure-Service-Connection'
+                    appName: '$(APP_NAME_DEV)'
+                    containers: '$(ACR_LOGIN_SERVER)/$(imageRepository):$(tag)'
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STAGE 4 — Déploiement PROD avec approbation manuelle + slot swap (Blue/Green)
+# ═══════════════════════════════════════════════════════════════════════════════
+  - stage: DeployProd
+    displayName: 'Deploy → PROD (approbation + Blue/Green)'
+    dependsOn: DockerBuild
+    condition: >
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/main')
+      )
+    jobs:
+      - deployment: DeployToProd
+        displayName: 'App Service PROD · staging slot → swap'
+        environment: 'prod'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # 1. Déployer d'abord sur le slot staging (zéro downtime)
+                - task: AzureWebAppContainer@1
+                  displayName: 'Déployer sur slot staging'
+                  inputs:
+                    azureSubscription: 'Azure-Service-Connection'
+                    appName: '$(APP_NAME_PROD)'
+                    slotName: 'staging'
+                    containers: '$(ACR_LOGIN_SERVER)/$(imageRepository):$(tag)'
+
+                # 2. Swap staging → production (Blue/Green)
+                - task: AzureAppServiceManage@0
+                  displayName: 'Swap staging → production'
+                  inputs:
+                    azureSubscription: 'Azure-Service-Connection'
+                    Action: 'Swap Slots'
+                    WebAppName: '$(APP_NAME_PROD)'
+                    ResourceGroupName: '$(RESOURCE_GROUP)'
+                    SourceSlot: 'staging'
+                    SwapWithProduction: true
