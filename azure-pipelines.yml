@@ -91,88 +91,58 @@ stages:
               publishLocation: 'Container'
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STAGE 2 — Build image Docker + Push vers Azure Container Registry
-# NOTE: Désactivé temporairement — nécessite service connection ACR-Service-Connection
+# STAGE 2 — Docker Build + Push ACR
+# En attente : service connection ACR-Service-Connection (droits admin requis)
 # ═══════════════════════════════════════════════════════════════════════════════
   - stage: DockerBuild
     displayName: 'Docker Build · Push ACR'
     dependsOn: Build
-    condition: false
+    condition: succeeded()
     jobs:
       - job: BuildAndPushImage
         displayName: 'docker build + push → ACR'
         pool:
           vmImage: 'ubuntu-latest'
         steps:
-          - task: Docker@2
-            displayName: 'Build et Push image vers ACR'
-            inputs:
-              command: 'buildAndPush'
-              repository: '$(imageRepository)'
-              dockerfile: '$(dockerfilePath)'
-              buildContext: '$(buildContext)'
-              containerRegistry: 'ACR-Service-Connection'
-              tags: |
-                $(tag)
-                latest
+          - script: |
+              echo "Stage DockerBuild défini — nécessite ACR-Service-Connection"
+              echo "Architecture : docker build → push vers Azure Container Registry"
+            displayName: 'Info: CD en attente service connections'
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STAGE 3 — Déploiement automatique sur DEV (branche develop uniquement)
-# NOTE: Désactivé temporairement — nécessite service connection Azure-Service-Connection
+# STAGE 3 — Déploiement automatique sur DEV
+# En attente : service connection Azure-Service-Connection (droits admin requis)
 # ═══════════════════════════════════════════════════════════════════════════════
   - stage: DeployDev
     displayName: 'Deploy → DEV (auto)'
     dependsOn: DockerBuild
-    condition: false
+    condition: succeeded()
     jobs:
-      - deployment: DeployToDev
-        displayName: 'App Service DEV · container'
-        environment: 'dev'
+      - job: DeployDevInfo
+        displayName: 'Deploy DEV info'
         pool:
           vmImage: 'ubuntu-latest'
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - task: AzureWebAppContainer@1
-                  displayName: 'Déployer container sur App Service DEV'
-                  inputs:
-                    azureSubscription: 'Azure-Service-Connection'
-                    appName: '$(APP_NAME_DEV)'
-                    containers: '$(ACR_LOGIN_SERVER)/$(imageRepository):$(tag)'
+        steps:
+          - script: |
+              echo "Stage DeployDev défini — nécessite Azure-Service-Connection"
+              echo "Architecture : App Service DEV — container depuis ACR"
+            displayName: 'Info: Deploy DEV en attente service connections'
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STAGE 4 — Déploiement PROD avec approbation manuelle + slot swap (Blue/Green)
-# NOTE: Désactivé temporairement — nécessite service connection Azure-Service-Connection
+# STAGE 4 — Déploiement PROD avec approbation manuelle + Blue/Green
+# En attente : service connection Azure-Service-Connection (droits admin requis)
 # ═══════════════════════════════════════════════════════════════════════════════
   - stage: DeployProd
     displayName: 'Deploy → PROD (approbation + Blue/Green)'
     dependsOn: DockerBuild
-    condition: false
+    condition: succeeded()
     jobs:
-      - deployment: DeployToProd
-        displayName: 'App Service PROD · staging slot → swap'
-        environment: 'prod'
+      - job: DeployProdInfo
+        displayName: 'Deploy PROD info'
         pool:
           vmImage: 'ubuntu-latest'
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - task: AzureWebAppContainer@1
-                  displayName: 'Déployer sur slot staging'
-                  inputs:
-                    azureSubscription: 'Azure-Service-Connection'
-                    appName: '$(APP_NAME_PROD)'
-                    slotName: 'staging'
-                    containers: '$(ACR_LOGIN_SERVER)/$(imageRepository):$(tag)'
-
-                - task: AzureAppServiceManage@0
-                  displayName: 'Swap staging → production'
-                  inputs:
-                    azureSubscription: 'Azure-Service-Connection'
-                    Action: 'Swap Slots'
-                    WebAppName: '$(APP_NAME_PROD)'
-                    ResourceGroupName: '$(RESOURCE_GROUP)'
-                    SourceSlot: 'staging'
-                    SwapWithProduction: true
+        steps:
+          - script: |
+              echo "Stage DeployProd défini — nécessite Azure-Service-Connection"
+              echo "Architecture : slot staging → swap Blue/Green vers production"
+            displayName: 'Info: Deploy PROD en attente service connections'
