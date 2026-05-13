@@ -87,7 +87,7 @@ stages:
           - task: PublishBuildArtifacts@1
             displayName: 'Publier JAR artifact'
             inputs:
-              PathtoPublish: '$(buildContext)/target/gestion-signalement-0.0.1-SNAPSHOT.jar'
+              PathtoPublish: '$(buildContext)/target/gestion-signalement.jar'
               ArtifactName: 'app-jar'
               publishLocation: 'Container'
 
