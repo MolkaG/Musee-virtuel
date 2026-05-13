@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# Pipeline CI/CD — Musée Virtuel (WebSocketsChat)
+# Pipeline CI/CD — Musée Virtuel (gestion-signalement)
 # Stages : Build → DockerBuild → DeployDev → DeployProd
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -22,16 +22,17 @@ pr:
 
 variables:
   # ── Groupe de variables défini dans Azure DevOps Library ──────────────────────
-  # Créer un groupe "musee-virtuel-variables" avec :
-  #   ACR_LOGIN_SERVER   = museevirtuelacr.azurecr.io
+  # Ajouter dans "musee-virtuel-variables" :
+  #   ACR_LOGIN_SERVER   = museevirtuelacr.azurecr.io  (si ACR disponible)
   #   APP_NAME_DEV       = app-musee-virtuel-dev
   #   APP_NAME_PROD      = app-musee-virtuel-prod
-  #   RESOURCE_GROUP     = rg-musee-virtuel-prod
-  #   SONAR_ORG          = <votre-org-sonarcloud>
+  #   RESOURCE_GROUP     = rg-museevirtuel-dev
+  #   SONAR_ORG          = molkag
   #   SONAR_PROJECT_KEY  = musee-virtuel
+  #   SONAR_TOKEN        = <secret>
+  #   DOCKER_HUB_USERNAME = <votre-username-dockerhub>
   - group: musee-virtuel-variables
 
-  # ── Variables statiques ───────────────────────────────────────────────────────
   - name: imageRepository
     value: 'musee-virtuel'
   - name: dockerfilePath
@@ -57,7 +58,6 @@ stages:
         pool:
           vmImage: 'ubuntu-latest'
         steps:
-          # Cache Maven pour accélérer les builds suivants
           - task: Cache@2
             displayName: 'Cache dépendances Maven'
             inputs:
@@ -65,7 +65,6 @@ stages:
               restoreKeys: 'maven | "$(Agent.OS)"'
               path: $(MAVEN_CACHE_FOLDER)
 
-          # Build Maven + tests JUnit + analyse SonarCloud (via plugin Maven natif)
           - task: Maven@3
             displayName: 'mvn clean verify + SonarCloud (Java 17)'
             inputs:
@@ -83,7 +82,6 @@ stages:
               javaHomeOption: 'JDKVersion'
               jdkVersionOption: '1.17'
 
-          # Publier le JAR comme artifact de pipeline
           - task: PublishBuildArtifacts@1
             displayName: 'Publier JAR artifact'
             inputs:
@@ -92,58 +90,99 @@ stages:
               publishLocation: 'Container'
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STAGE 2 — Docker Build + Push ACR
-# En attente : service connection ACR-Service-Connection (droits admin requis)
+# STAGE 2 — Docker Build + Push vers Docker Hub
+# Prérequis : service connection "DockerHub-Service-Connection"
+#   → Project Settings → Service connections → Docker Registry → Docker Hub
+#   (ne nécessite PAS de droits Entra ID)
 # ═══════════════════════════════════════════════════════════════════════════════
   - stage: DockerBuild
-    displayName: 'Docker Build · Push ACR'
+    displayName: 'Docker Build · Push Docker Hub'
     dependsOn: Build
     condition: succeeded()
     jobs:
       - job: BuildAndPushImage
-        displayName: 'docker build + push → ACR'
+        displayName: 'docker build + push → Docker Hub'
         pool:
           vmImage: 'ubuntu-latest'
         steps:
-          - script: |
-              echo "Stage DockerBuild défini — nécessite ACR-Service-Connection"
-              echo "Architecture : docker build → push vers Azure Container Registry"
-            displayName: 'Info: CD en attente service connections'
+          - task: Docker@2
+            displayName: 'Build image Docker (multi-stage)'
+            inputs:
+              containerRegistry: 'DockerHub-Service-Connection'
+              repository: '$(DOCKER_HUB_USERNAME)/$(imageRepository)'
+              command: 'build'
+              dockerfile: '$(dockerfilePath)'
+              buildContext: '$(buildContext)'
+              tags: |
+                $(tag)
+                latest
+
+          - task: Docker@2
+            displayName: 'Push image vers Docker Hub'
+            inputs:
+              containerRegistry: 'DockerHub-Service-Connection'
+              repository: '$(DOCKER_HUB_USERNAME)/$(imageRepository)'
+              command: 'push'
+              tags: |
+                $(tag)
+                latest
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STAGE 3 — Déploiement automatique sur DEV
-# En attente : service connection Azure-Service-Connection (droits admin requis)
+# STAGE 3 — Déploiement automatique sur DEV (main branch uniquement)
+# Prérequis : service connection "Azure-Service-Connection"
 # ═══════════════════════════════════════════════════════════════════════════════
   - stage: DeployDev
     displayName: 'Deploy → DEV (auto)'
     dependsOn: DockerBuild
-    condition: succeeded()
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
     jobs:
-      - job: DeployDevInfo
-        displayName: 'Deploy DEV info'
+      - job: DeployDev
+        displayName: 'Deploy container → App Service DEV'
         pool:
           vmImage: 'ubuntu-latest'
         steps:
-          - script: |
-              echo "Stage DeployDev défini — nécessite Azure-Service-Connection"
-              echo "Architecture : App Service DEV — container depuis ACR"
-            displayName: 'Info: Deploy DEV en attente service connections'
+          - task: AzureWebAppContainer@1
+            displayName: 'Déployer image sur App Service DEV'
+            inputs:
+              azureSubscription: 'Azure-Service-Connection'
+              appName: '$(APP_NAME_DEV)'
+              containers: 'docker.io/$(DOCKER_HUB_USERNAME)/$(imageRepository):$(tag)'
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STAGE 4 — Déploiement PROD avec approbation manuelle + Blue/Green
-# En attente : service connection Azure-Service-Connection (droits admin requis)
+# Slot staging → swap vers production (zero-downtime)
+# Prérequis : service connection "Azure-Service-Connection"
+#           + environnement "production" avec approbation dans Azure DevOps
 # ═══════════════════════════════════════════════════════════════════════════════
   - stage: DeployProd
     displayName: 'Deploy → PROD (approbation + Blue/Green)'
-    dependsOn: DockerBuild
-    condition: succeeded()
+    dependsOn: DeployDev
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
     jobs:
-      - job: DeployProdInfo
-        displayName: 'Deploy PROD info'
+      - deployment: DeployProd
+        displayName: 'Deploy → slot staging + swap production'
+        environment: 'production'
         pool:
           vmImage: 'ubuntu-latest'
-        steps:
-          - script: |
-              echo "Stage DeployProd défini — nécessite Azure-Service-Connection"
-              echo "Architecture : slot staging → swap Blue/Green vers production"
-            displayName: 'Info: Deploy PROD en attente service connections'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebAppContainer@1
+                  displayName: 'Déployer image → slot staging'
+                  inputs:
+                    azureSubscription: 'Azure-Service-Connection'
+                    appName: '$(APP_NAME_PROD)'
+                    deployToSlotOrASE: true
+                    resourceGroupName: '$(RESOURCE_GROUP)'
+                    slotName: 'staging'
+                    containers: 'docker.io/$(DOCKER_HUB_USERNAME)/$(imageRepository):$(tag)'
+
+                - task: AzureAppServiceManage@0
+                  displayName: 'Swap staging → production (Blue/Green)'
+                  inputs:
+                    azureSubscription: 'Azure-Service-Connection'
+                    Action: 'Swap Slots'
+                    WebAppName: '$(APP_NAME_PROD)'
+                    ResourceGroupName: '$(RESOURCE_GROUP)'
+                    SourceSlot: 'staging'
