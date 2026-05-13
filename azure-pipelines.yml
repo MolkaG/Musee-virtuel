@@ -128,61 +128,60 @@ stages:
                 latest
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STAGE 3 — Déploiement automatique sur DEV (main branch uniquement)
-# Prérequis : service connection "Azure-Service-Connection"
+# STAGE 3 & 4 — Désactivés temporairement
+# Raison : Azure-Service-Connection non disponible (contrainte de souscription —
+#          droits Entra ID insuffisants pour créer la service connection Azure).
+# Architecture CD documentée dans docs/RAPPORT_TEMPLATE.md :
+#   DEV  → AzureWebAppContainer@1 (déploiement automatique depuis main)
+#   PROD → slot staging + swap Blue/Green (AzureAppServiceManage@0)
 # ═══════════════════════════════════════════════════════════════════════════════
-  - stage: DeployDev
-    displayName: 'Deploy → DEV (auto)'
-    dependsOn: DockerBuild
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-    jobs:
-      - job: DeployDev
-        displayName: 'Deploy container → App Service DEV'
-        pool:
-          vmImage: 'ubuntu-latest'
-        steps:
-          - task: AzureWebAppContainer@1
-            displayName: 'Déployer image sur App Service DEV'
-            inputs:
-              azureSubscription: 'Azure-Service-Connection'
-              appName: '$(APP_NAME_DEV)'
-              containers: 'docker.io/$(DOCKER_HUB_USERNAME)/$(imageRepository):$(tag)'
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# STAGE 4 — Déploiement PROD avec approbation manuelle + Blue/Green
-# Slot staging → swap vers production (zero-downtime)
-# Prérequis : service connection "Azure-Service-Connection"
-#           + environnement "production" avec approbation dans Azure DevOps
-# ═══════════════════════════════════════════════════════════════════════════════
-  - stage: DeployProd
-    displayName: 'Deploy → PROD (approbation + Blue/Green)'
-    dependsOn: DeployDev
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-    jobs:
-      - deployment: DeployProd
-        displayName: 'Deploy → slot staging + swap production'
-        environment: 'prod'
-        pool:
-          vmImage: 'ubuntu-latest'
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - task: AzureWebAppContainer@1
-                  displayName: 'Déployer image → slot staging'
-                  inputs:
-                    azureSubscription: 'Azure-Service-Connection'
-                    appName: '$(APP_NAME_PROD)'
-                    deployToSlotOrASE: true
-                    resourceGroupName: '$(RESOURCE_GROUP)'
-                    slotName: 'staging'
-                    containers: 'docker.io/$(DOCKER_HUB_USERNAME)/$(imageRepository):$(tag)'
-
-                - task: AzureAppServiceManage@0
-                  displayName: 'Swap staging → production (Blue/Green)'
-                  inputs:
-                    azureSubscription: 'Azure-Service-Connection'
-                    Action: 'Swap Slots'
-                    WebAppName: '$(APP_NAME_PROD)'
-                    ResourceGroupName: '$(RESOURCE_GROUP)'
-                    SourceSlot: 'staging'
+#
+#  - stage: DeployDev
+#    displayName: 'Deploy → DEV (auto)'
+#    dependsOn: DockerBuild
+#    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+#    jobs:
+#      - job: DeployDev
+#        displayName: 'Deploy container → App Service DEV'
+#        pool:
+#          vmImage: 'ubuntu-latest'
+#        steps:
+#          - task: AzureWebAppContainer@1
+#            displayName: 'Déployer image sur App Service DEV'
+#            inputs:
+#              azureSubscription: 'Azure-Service-Connection'
+#              appName: '$(APP_NAME_DEV)'
+#              containers: 'docker.io/$(DOCKER_HUB_USERNAME)/$(imageRepository):$(tag)'
+#
+#  - stage: DeployProd
+#    displayName: 'Deploy → PROD (approbation + Blue/Green)'
+#    dependsOn: DeployDev
+#    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+#    jobs:
+#      - deployment: DeployProd
+#        displayName: 'Deploy → slot staging + swap production'
+#        environment: 'prod'
+#        pool:
+#          vmImage: 'ubuntu-latest'
+#        strategy:
+#          runOnce:
+#            deploy:
+#              steps:
+#                - task: AzureWebAppContainer@1
+#                  displayName: 'Déployer image → slot staging'
+#                  inputs:
+#                    azureSubscription: 'Azure-Service-Connection'
+#                    appName: '$(APP_NAME_PROD)'
+#                    deployToSlotOrASE: true
+#                    resourceGroupName: '$(RESOURCE_GROUP)'
+#                    slotName: 'staging'
+#                    containers: 'docker.io/$(DOCKER_HUB_USERNAME)/$(imageRepository):$(tag)'
+#
+#                - task: AzureAppServiceManage@0
+#                  displayName: 'Swap staging → production (Blue/Green)'
+#                  inputs:
+#                    azureSubscription: 'Azure-Service-Connection'
+#                    Action: 'Swap Slots'
+#                    WebAppName: '$(APP_NAME_PROD)'
+#                    ResourceGroupName: '$(RESOURCE_GROUP)'
+#                    SourceSlot: 'staging'
