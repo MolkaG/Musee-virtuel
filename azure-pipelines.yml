@@ -161,7 +161,7 @@ stages:
     jobs:
       - deployment: DeployProd
         displayName: 'Deploy → slot staging + swap production'
-        environment: 'production'
+        environment: 'prod'
         pool:
           vmImage: 'ubuntu-latest'
         strategy:
