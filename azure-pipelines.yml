@@ -128,13 +128,11 @@ stages:
                 latest
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STAGE 3 — Déploiement automatique sur Azure Container Instances (centralindia)
-# Raison : Azure-Service-Connection bloqué (droits Entra ID insuffisants).
-# Solution : az login avec credentials stockés comme secrets dans la Library.
-# Prérequis dans musee-virtuel-variables :
-#   AZURE_USERNAME    = Molka.GMAR@esprit.tn  (secret)
-#   AZURE_PASSWORD    = ***                    (secret)
-#   AZURE_SUBSCRIPTION = fc48fe67-aac8-4479-b90a-85e9b1aca6f7
+# STAGE 3 — Déploiement CD sur Azure Container Instances (centralindia)
+# Agent : self-hosted "testauto-agent" (pool Self-hosted) — déjà authentifié Azure.
+# Raison : MFA tenant Esprit bloque az login -u/-p ; SP Entra ID non autorisé.
+# Solution : agent sur VM testauto avec session az active (pas de re-login).
+# RG cible : rg-musee-allowed | Profil Spring : dev (H2 in-memory, sans MySQL externe)
 # ═══════════════════════════════════════════════════════════════════════════════
   - stage: DeployACI
     displayName: 'Deploy → Azure Container Instances (centralindia)'
@@ -145,18 +143,17 @@ stages:
         displayName: 'Deploy container → ACI centralindia'
         environment: 'dev'
         pool:
-          vmImage: 'ubuntu-latest'
+          name: 'Self-hosted'
         strategy:
           runOnce:
             deploy:
               steps:
                 - task: Bash@3
-                  displayName: 'az login + deploy ACI'
+                  displayName: 'deploy ACI (self-hosted agent)'
                   inputs:
                     targetType: 'inline'
                     script: |
-                      az login -u "$(AZURE_USERNAME)" -p "$(AZURE_PASSWORD)" --output none
-                      az account set --subscription "$(AZURE_SUBSCRIPTION)"
+                      set -e
 
                       az container delete \
                         --resource-group rg-musee-allowed \
@@ -174,9 +171,17 @@ stages:
                         --restart-policy Always \
                         --location centralindia \
                         --environment-variables \
-                          SPRING_PROFILES_ACTIVE=prod \
-                          SPRING_DATASOURCE_URL="jdbc:mysql://musee-db-molka.mysql.database.azure.com:3306/gestion_signalement?useSSL=true&requireSSL=false&serverTimezone=UTC" \
-                          SPRING_DATASOURCE_USERNAME="adminmusee" \
-                          SPRING_DATASOURCE_PASSWORD="$(AZURE_PASSWORD)"
+                          SPRING_PROFILES_ACTIVE=dev \
+                          SERVER_PORT=8080
 
-                      echo "✅ Déployé sur : http://musee-$(Build.BuildId).centralindia.azurecontainer.io:8080"
+                      az container show \
+                        --resource-group rg-musee-allowed \
+                        --name musee-backend \
+                        --query "{State:instanceView.state, FQDN:ipAddress.fqdn}" \
+                        -o table
+
+                      FQDN=$(az container show \
+                        --resource-group rg-musee-allowed \
+                        --name musee-backend \
+                        --query "ipAddress.fqdn" -o tsv)
+                      echo "Application deployee : http://$FQDN:8080"

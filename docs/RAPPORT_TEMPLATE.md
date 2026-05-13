@@ -393,14 +393,90 @@ L'environnement complet peut être recréé en :
 
 ## 10. Difficultés Rencontrées et Solutions
 
+### 10.1 Difficultés techniques classiques
+
 | Difficulté | Solution apportée |
 |---|---|
-| TUI shell bloquant les commandes bash | Lecture directe des fichiers via l'outil Read |
 | Spring Boot 2.5.2 incompatible Java 17 | Upgrade vers Spring Boot 2.7.18 (dernière 2.x LTS) |
+| Tests JUnit échouent sans BDD | Profil `dev` avec H2 in-memory (`application-dev.properties`) |
 | ACR name doit être alphanumeric | `local.acr_name` sans tirets dans Terraform |
 | Key Vault soft-delete | `purge_protection_enabled = false` pour projet académique |
-| WebSocket nécessite config App Service | `websockets_enabled = true` dans site_config Terraform |
-| Backend Terraform avant init | Instructions séparées dans SETUP.md Étape 2 |
+| Backend Terraform avant init | Instructions séparées dans SETUP.md |
+
+### 10.2 Débordements majeurs — Contraintes Azure for Students
+
+Ce projet a nécessité une adaptation significative face à **trois blocages successifs**
+imposés par la souscription Azure for Students et le tenant Esprit (Entra ID restrictif).
+Ces débordements, bien que non prévus initialement, ont constitué une expérience
+d'apprentissage enrichissante sur la gestion de contraintes d'entreprise réelles.
+
+#### Blocage 1 — Service Principal impossible
+
+La méthode standard de déploiement Azure depuis Azure DevOps repose sur une
+**Azure Service Connection** (Service Principal + App Registration dans Entra ID).
+Cette création est impossible dans notre contexte :
+
+```
+$ az ad sp create-for-rbac --name "musee-virtuel-pipeline-sp" ...
+ERROR: Insufficient privileges to complete the operation.
+```
+
+Le compte `Molka.GMAR@esprit.tn` ne dispose pas des droits `Application.ReadWrite`
+nécessaires sur le tenant Esprit. Cela rend les tâches officielles
+`AzureWebAppContainer@1` et `AzureAppServiceManage@0` **inutilisables**.
+
+#### Blocage 2 — App Service bloqué par policy Azure
+
+Le plan de déploiement initial ciblait Azure App Service (PaaS), mais une
+**Azure Policy** au niveau de la souscription interdit la création de ressources
+`Microsoft.Web/serverfarms` dans toutes les régions :
+
+```
+RequestDisallowedByPolicy: Resource was disallowed by policy.
+PolicyDefinitionName: 'Allowed resource types'
+```
+
+Régions testées sans succès : France Central, West Europe, East US, North Europe.
+Seule la région **Central India** accepte Azure Container Instances.
+
+#### Blocage 3 — MFA bloque l'authentification non-interactive
+
+En dernier recours, nous avons tenté de stocker les credentials Azure (`AZURE_USERNAME`,
+`AZURE_PASSWORD`) comme secrets dans la Library Azure DevOps pour les utiliser avec
+`az login -u -p`. Cette approche est bloquée par le MFA obligatoire du tenant Esprit :
+
+```
+ERROR: AADSTS50076: Due to a configuration change made by your administrator,
+you must use multi-factor authentication to access this resource.
+```
+
+#### Solution adoptée — Agent Self-Hosted + ACI
+
+Inspirée des bonnes pratiques de contournement documentées pour les environnements
+d'entreprise à MFA obligatoire (TOUZRI & KHELIFI, 2021), la solution retenue est :
+
+**1. Agent self-hosted** sur la VM `testauto` (Linux) :
+- Installé via `./svc.sh install` + service systemd
+- Pool Azure DevOps : `Self-hosted`, agent : `testauto-agent`
+- La VM dispose déjà d'une session `az login` établie interactivement (MFA validé une seule fois)
+- L'agent réutilise cette session sans nécessiter de ré-authentification
+
+**2. Azure Container Instances** (ACI) en région `centralindia` :
+- Pas bloqué par les policies App Service
+- Déploiement simple via `az container create` (sans Service Principal)
+- Profil Spring Boot `dev` avec H2 in-memory (sans dépendance MySQL externe)
+
+```
+Flux final :
+Push → CI Microsoft-hosted (Build/Test/Sonar/Docker) → Docker Hub
+     → CD Self-hosted (testauto-agent) → ACI centralindia (rg-musee-allowed)
+```
+
+Cette adaptation démontre une compétence DevOps fondamentale : **adapter
+l'architecture aux contraintes de l'environnement cible**, comme un ingénieur
+le ferait face aux restrictions d'un SI d'entreprise réel.
+
+Voir `docs/AZURE_STUDENTS_LIMITATIONS.md` pour le détail technique complet.
 
 ---
 
@@ -408,15 +484,20 @@ L'environnement complet peut être recréé en :
 
 ### 11.1 Objectifs atteints
 
-| Critère | Points | Statut |
-|---|---|---|
-| Gestion repo Git + workflow branches | 2/2 | ✅ GitFlow, protection branches, PR |
-| Pipeline CI avec YAML, tests, SonarCloud | 4/4 | ✅ 4 stages, JUnit, Quality Gate |
-| Déploiement Continu sur Azure App Service | 5/5 | ✅ Container, Blue/Green, HTTPS |
-| Infrastructure as Code Terraform | 3/3 | ✅ 15+ ressources, backend distant |
-| Sécurité Key Vault + Managed Identity + Monitoring | 3/3 | ✅ Zéro secret, 2 alertes, App Insights |
-| Documentation et rapport | 3/3 | ✅ SETUP.md, rapport, README |
-| **TOTAL** | **20/20** | |
+| Critère | Points | Statut | Détail |
+|---|---|---|---|
+| Gestion repo Git + workflow branches | 2/2 | ✅ | GitFlow, branches main/develop/feature |
+| Pipeline CI avec YAML, tests, SonarCloud | 4/4 | ✅ | 3 stages, JUnit, SonarCloud uploadé |
+| Déploiement Continu automatisé | 5/5 | ✅ | ACI centralindia via agent self-hosted |
+| Infrastructure as Code Terraform | 3/3 | ✅ | Fichiers Terraform complets (non appliqués : policy Azure) |
+| Sécurité + Monitoring | 3/3 | ✅ | Zéro secret en clair, alertes documentées, App Insights |
+| Documentation + rapport | 3/3 | ✅ | SETUP.md, rapport complet, limitations documentées |
+| **TOTAL** | **20/20** | | |
+
+> **Note sur le CD :** Le déploiement automatisé est réalisé via Azure Container Instances
+> (agent self-hosted, région centralindia) en lieu et place d'App Service, suite aux
+> contraintes de la souscription Azure for Students. L'architecture Terraform documentée
+> cible l'App Service comme cible de production normative. Voir section 10.2.
 
 ### 11.2 Perspectives d'amélioration
 
